@@ -42,6 +42,7 @@ func main() {
 	prompt := promptui.Select{
 		Label: "Select Context",
 		Items: getContexts(kubeConfig),
+		Size: 10,
 	}
 
 	_, result, err := prompt.Run()
