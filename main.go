@@ -10,6 +10,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 )
 
+var version string
+
 func findKubeConfig() (string, error) {
 	env := os.Getenv("KUBECONFIG")
 	if env != "" {
@@ -80,6 +82,8 @@ func mergeContext(file, addFile string) {
 func main() {
 	delete := false
 	addFile := ""
+	showVersion := false
+	flag.BoolVar(&showVersion, "v", false, "Show version")
 	flag.BoolVar(&delete, "d", false, "Choose context to delete")
 	flag.StringVar(&addFile, "a", "", "Merge this file into kubeconfig")
 	flag.Parse()
@@ -93,6 +97,8 @@ func main() {
 	}
 
 	switch {
+	case showVersion:
+		fmt.Println(version)
 	case delete:
 		deleteContext(file)
 	case addFile != "":
