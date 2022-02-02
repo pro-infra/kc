@@ -1,13 +1,13 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"log"
 	"os"
 
-	"github.com/manifoldco/promptui"
 	homedir "github.com/mitchellh/go-homedir"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/tools/clientcmd/api"
 )
 
 func findKubeConfig() (string, error) {
@@ -21,40 +21,83 @@ func findKubeConfig() (string, error) {
 	}
 	return path, nil
 }
-func getContexts(kubeConfig *api.Config) []string {
-	list := []string{}
-	for n := range kubeConfig.Contexts {
-		list = append(list, n)
+
+func chooseContext(file string) {
+	k := newKubeconfig(file)
+	result := k.chooseContext("Select Context")
+	fmt.Printf("You choose %q\n", result)
+	k.CurrentContext = result
+	err := clientcmd.WriteToFile(k.Config, file)
+	if err != nil {
+		panic(err)
 	}
-	return list
+}
+
+func deleteContext(file string) {
+	k := newKubeconfig(file)
+	result := k.chooseContext("Delete Context")
+
+	err := clientcmd.WriteToFile(k.Config, fmt.Sprintf("%s.bak", file))
+	if err != nil {
+		panic(err)
+	}
+
+	k.deleteContext(result)
+	k.cleanupUnusedItems()
+
+	err = clientcmd.WriteToFile(k.Config, file)
+	if err != nil {
+		panic(err)
+	}
+}
+
+func mergeContext(file, addFile string) {
+	k := newKubeconfig(file)
+
+	err := clientcmd.WriteToFile(k.Config, fmt.Sprintf("%s.bak", file))
+	if err != nil {
+		panic(err)
+	}
+
+	a := newKubeconfig(addFile)
+	for key, c := range a.Clusters {
+		k.Clusters[key] = c
+	}
+	for key, u := range a.AuthInfos {
+		k.AuthInfos[key] = u
+	}
+	for key, c := range a.Contexts {
+		k.Contexts[key] = c
+	}
+
+	err = clientcmd.WriteToFile(k.Config, file)
+	if err != nil {
+		panic(err)
+	}
+
 }
 
 func main() {
-	k, err := findKubeConfig()
-	if err != nil {
-		panic(err)
+	delete := false
+	addFile := ""
+	flag.BoolVar(&delete, "d", false, "Choose context to delete")
+	flag.StringVar(&addFile, "a", "", "Merge this file into kubeconfig")
+	flag.Parse()
+
+	if delete && addFile != "" {
+		log.Fatalln("delete and merge is not allowed")
 	}
-	kubeConfig, err := clientcmd.LoadFromFile(k)
+	file, err := findKubeConfig()
 	if err != nil {
 		panic(err)
 	}
 
-	prompt := promptui.Select{
-		Label: "Select Context",
-		Items: getContexts(kubeConfig),
-		Size: 10,
-	}
-
-	_, result, err := prompt.Run()
-
-	if err != nil {
-		fmt.Printf("Prompt failed %v\n", err)
-		return
-	}
-	fmt.Printf("You choose %q\n", result)
-	kubeConfig.CurrentContext = result
-	err = clientcmd.WriteToFile(*kubeConfig, k)
-	if err != nil {
-		panic(err)
+	switch {
+	case delete:
+		deleteContext(file)
+	case addFile != "":
+		mergeContext(file, addFile)
+	default:
+		chooseContext(file)
 	}
 }
