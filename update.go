@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	GITHUB_OWNER = "schreibe72"
+	GITHUB_OWNER = "pro-infra"
 	GITHUB_REPO  = "kc"
 )
 
