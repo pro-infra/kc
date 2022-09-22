@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 
 	homedir "github.com/mitchellh/go-homedir"
 	"k8s.io/client-go/tools/clientcmd"
 )
 
 var version string
+
+const GOARCH string = runtime.GOARCH
+const GOOS string = runtime.GOOS
 
 func findKubeConfig() (string, error) {
 	env := os.Getenv("KUBECONFIG")
@@ -80,13 +84,26 @@ func mergeContext(file, addFile string) {
 }
 
 func main() {
+	showVersion := false
+	update := false
+	dryupd := false
 	delete := false
 	addFile := ""
-	showVersion := false
 	flag.BoolVar(&showVersion, "v", false, "Show version")
+	flag.BoolVar(&update, "u", false, "Update kc")
+	flag.BoolVar(&dryupd, "U", false, "Dry-run update kc")
 	flag.BoolVar(&delete, "d", false, "Choose context to delete")
 	flag.StringVar(&addFile, "a", "", "Merge this file into kubeconfig")
 	flag.Parse()
+
+	switch {
+	case showVersion:
+		fmt.Println(version, GOOS, GOARCH)
+		return
+	case update || dryupd:
+		updatekc(dryupd)
+		return
+	}
 
 	if delete && addFile != "" {
 		log.Fatalln("delete and merge is not allowed")
@@ -97,8 +114,6 @@ func main() {
 	}
 
 	switch {
-	case showVersion:
-		fmt.Println(version)
 	case delete:
 		deleteContext(file)
 	case addFile != "":
