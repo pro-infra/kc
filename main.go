@@ -83,16 +83,33 @@ func mergeContext(file, addFile string) {
 
 }
 
+type groups []string
+
+func (g *groups) String() string {
+	return fmt.Sprintf("%v", g)
+}
+
+func (g *groups) Set(value string) error {
+	*g = append(*g, value)
+	return nil
+}
+
 func main() {
 	showVersion := false
 	update := false
 	dryupd := false
 	delete := false
+	userName := ""
+	userGroups := groups{}
+	days := 0
 	addFile := ""
 	flag.BoolVar(&showVersion, "v", false, "Show version")
 	flag.BoolVar(&update, "u", false, "Update kc")
 	flag.BoolVar(&dryupd, "U", false, "Dry-run update kc")
 	flag.BoolVar(&delete, "d", false, "Choose context to delete")
+	flag.StringVar(&userName, "username", "", "access certificate for username")
+	flag.IntVar(&days, "days", 1, "valid for n days")
+	flag.Var(&userGroups, "group", "groups for access cerificate")
 	flag.StringVar(&addFile, "a", "", "Merge this file into kubeconfig")
 	flag.Parse()
 
@@ -114,6 +131,8 @@ func main() {
 	}
 
 	switch {
+	case userName != "":
+		addUserCert(file, days, userName, userGroups...)
 	case delete:
 		deleteContext(file)
 	case addFile != "":

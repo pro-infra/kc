@@ -39,6 +39,11 @@ func (k *kubeconfig) chooseContext(label string) string {
 	return result
 }
 
+func (k *kubeconfig) getClusterName() string {
+	c := k.CurrentContext
+	return k.Contexts[c].Cluster
+}
+
 func (k *kubeconfig) deleteContext(context string) {
 	if len(k.Contexts) <= 1 {
 		log.Fatalln("Only one Context - Nothing deleted - Delete the hole file")
