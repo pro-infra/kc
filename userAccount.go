@@ -63,7 +63,6 @@ func (c *certificateAuthRequest) getCertificateSigningRequest() (csr certificate
 		SignatureAlgorithm: x509.SHA512WithRSA,
 	}
 	if len(c.groups) > 0 {
-		fmt.Printf("Add Groups\n")
 		csrTemplate.Subject.Organization = c.groups
 	}
 

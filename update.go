@@ -103,7 +103,12 @@ func updatekc(dryRun bool) {
 	}
 	log.Println("Update needed")
 
-	filename := os.Args[0]
+	filename, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	log.Printf("Update executable: %s\n", filename)
+
 	if err = checkWriteProtection(filename); err != nil {
 		log.Fatalln(err)
 	}
@@ -165,7 +170,7 @@ func parseVersions(tags []GitHubTagResponse) []versiont {
 func checkWriteProtection(filename string) error {
 	var err error
 	var info os.FileInfo
-	if info, err = os.Lstat(os.Args[0]); err != nil {
+	if info, err = os.Lstat(filename); err != nil {
 		return err
 	}
 	if info.Mode().Perm()&0200 == 0 {
