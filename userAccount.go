@@ -6,118 +6,126 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
-	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 
 	certificatev1 "k8s.io/api/certificates/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/client-go/kubernetes"
+	v1 "k8s.io/client-go/kubernetes/typed/certificates/v1"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/tools/clientcmd/api"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/client-go/tools/clientcmd/api"
 )
 
-func addUserCert(file string, days int, username string, groups ...string) {
-	csr := newCSR(4096, username, groups...)
-	cert := genK8SCertificate(file, csr, days)
-	k := newKubeconfig(file)
-	a := api.AuthInfo{
-		ClientCertificateData: cert,
-		ClientKeyData:         []byte(base64.StdEncoding.EncodeToString(csr.privatKey)),
-	}
-	k.AuthInfos[fmt.Sprintf("%s@%s", username, k.getClusterName())] = &a
+type certificateAuthRequest struct {
+	name              string
+	groups            []string
+	expirationSeconds int32
+	keyLength         int
+}
 
-	c := api.Context{
-		Cluster:  k.getClusterName(),
-		AuthInfo: fmt.Sprintf("%s@%s", username, k.getClusterName()),
-	}
-	k.Contexts[fmt.Sprintf("%s@%s", username, k.CurrentContext)] = &c
-	err := clientcmd.WriteToFile(k.Config, file)
-	if err != nil {
-		panic(err)
+const defaultKeyLength = 4096
+
+func newCertificateAuthRequest(name string, groups ...string) certificateAuthRequest {
+	return certificateAuthRequest{
+		name:              name,
+		groups:            groups,
+		keyLength:         defaultKeyLength,
+		expirationSeconds: 86400,
 	}
 }
 
-type csr struct {
-	name      string
-	groups    []string
-	keyLength int
-	pem       []byte
-	privatKey []byte
+func (c *certificateAuthRequest) setKeyLength(k int) {
+	c.keyLength = k
 }
 
-func newCSR(length int, name string, groups ...string) csr {
-	output := csr{keyLength: length, name: name, groups: groups}
-	privateKey, err := rsa.GenerateKey(rand.Reader, length)
+func (c *certificateAuthRequest) getCertificateSigningRequest() (csr certificateSigningRequest, err error) {
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, c.keyLength)
 	if err != nil {
-		panic(err)
+		return
 	}
-	output.privatKey = pem.EncodeToMemory(&pem.Block{
+	if err != nil {
+		return
+	}
+	csr.privatKey = pem.EncodeToMemory(&pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(privateKey),
 	})
 	var csrTemplate = x509.CertificateRequest{
 		Subject: pkix.Name{
-			CommonName:   name,
-			Organization: groups,
+			CommonName: c.name,
 		},
 		SignatureAlgorithm: x509.SHA512WithRSA,
+	}
+	if len(c.groups) > 0 {
+		fmt.Printf("Add Groups\n")
+		csrTemplate.Subject.Organization = c.groups
 	}
 
 	csrCertificate, err := x509.CreateCertificateRequest(rand.Reader, &csrTemplate, privateKey)
 	if err != nil {
-		panic(err)
+		return
 	}
 
-	output.pem = pem.EncodeToMemory(&pem.Block{
+	csr.pem = pem.EncodeToMemory(&pem.Block{
 		Type: "CERTIFICATE REQUEST", Bytes: csrCertificate,
 	})
 
-	return output
+	return
 }
 
-func genK8SCertificate(file string, certReq csr, days int) []byte {
+type certificateSigningRequest struct {
+	pem       []byte
+	privatKey []byte
+}
+
+type certificateClient struct {
+	client v1.CertificatesV1Interface
+}
+
+func newCertificateClient(file string) (cc certificateClient, err error) {
+
 	config, err := clientcmd.BuildConfigFromFlags("", file)
 	if err != nil {
-		panic(err.Error())
+		return
 	}
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		panic(err.Error())
+		return
 	}
-	certificateClient := clientset.CertificatesV1()
+	c := clientset.CertificatesV1()
+	cc.client = c
+	return
+}
 
-	e := int32(days * 86400)
-
+func (c certificateClient) sendCertificateSigningRequest(name string, csr certificateSigningRequest, expirationSeconds int32) (cr *certificatev1.CertificateSigningRequest, err error) {
 	certificateSigningRequest := certificatev1.CertificateSigningRequest{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: certReq.name,
+			Name: name,
 		},
 		Spec: certificatev1.CertificateSigningRequestSpec{
 			Groups:            []string{"system:authenticated"},
-			Request:           certReq.pem,
+			Request:           csr.pem,
 			SignerName:        "kubernetes.io/kube-apiserver-client",
-			ExpirationSeconds: &e,
+			ExpirationSeconds: &expirationSeconds,
 			Usages:            []certificatev1.KeyUsage{"client auth"},
 		},
 	}
+	cr, err = c.client.CertificateSigningRequests().Create(context.TODO(), &certificateSigningRequest, metav1.CreateOptions{})
+	return
+}
 
-	crl, err := certificateClient.CertificateSigningRequests().List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		panic(err)
-	}
+func (c certificateClient) deleteCertificateSigningRequest(name string) error {
+	return c.client.CertificateSigningRequests().Delete(context.TODO(), name, metav1.DeleteOptions{})
+}
 
-	for _, i := range crl.Items {
-		if i.Name == certReq.name {
-			certificateClient.CertificateSigningRequests().Delete(context.TODO(), i.Name, metav1.DeleteOptions{})
-		}
-	}
-	cr, err := certificateClient.CertificateSigningRequests().Create(context.TODO(), &certificateSigningRequest, metav1.CreateOptions{})
-	if err != nil {
-		panic(err)
-	}
+func (c certificateClient) approveAndSignCertificateSigningRequest(cr *certificatev1.CertificateSigningRequest) (certificate []byte, err error) {
+	certificate = []byte{}
 	cr.Status.Conditions = append(cr.Status.Conditions, certificatev1.CertificateSigningRequestCondition{
 		Type:           certificatev1.RequestConditionType("Approved"),
 		Status:         corev1.ConditionTrue,
@@ -125,22 +133,76 @@ func genK8SCertificate(file string, certReq csr, days int) []byte {
 		Message:        "This CSR was approved by kc certificate approve.",
 		LastUpdateTime: metav1.Now(),
 	})
-	cr, err = certificateClient.CertificateSigningRequests().UpdateApproval(context.TODO(), cr.Name, cr, metav1.UpdateOptions{})
+	cr, err = c.client.CertificateSigningRequests().UpdateApproval(context.TODO(), cr.Name, cr, metav1.UpdateOptions{})
 	if err != nil {
-		panic(err)
+		return
 	}
-	w, err := certificateClient.CertificateSigningRequests().Watch(context.TODO(), metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("metadata.name=%s", certReq.name),
+	w, err := c.client.CertificateSigningRequests().Watch(context.TODO(), metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("metadata.name=%s", cr.Name),
 	})
 	if err != nil {
-		panic(err)
+		return
 	}
+
 	for e := range w.ResultChan() {
 		t := e.Object.(*certificatev1.CertificateSigningRequest)
-		if e.Type == watch.Modified && string(t.Status.Certificate) != "" {
+		certificate = t.Status.Certificate
+		if e.Type == watch.Modified && string(certificate) != "" {
 			w.Stop()
-			return t.Status.Certificate
+			return
 		}
 	}
-	return []byte{}
+
+	return
+}
+
+func addUserCert(file string, days int, username string, groups ...string) {
+	authRequest := newCertificateAuthRequest(username, groups...)
+	csr, err := authRequest.getCertificateSigningRequest()
+	if err != nil {
+		panic(err)
+	}
+
+	cc, err := newCertificateClient(file)
+	if err != nil {
+		panic(err)
+	}
+
+	cr, err := cc.sendCertificateSigningRequest(username, csr, int32(days*86400))
+	if errors.IsAlreadyExists(err) {
+		if err = cc.deleteCertificateSigningRequest(username); err != nil {
+			panic(err)
+		}
+		if cr, err = cc.sendCertificateSigningRequest(username, csr, int32(days*86400)); err != nil {
+			panic(err)
+		}
+	}
+
+	if err != nil {
+		panic(err)
+	}
+
+	cert, err := cc.approveAndSignCertificateSigningRequest(cr)
+	if err != nil {
+		panic(err)
+	}
+
+	a := api.AuthInfo{
+		ClientCertificateData: cert,
+		ClientKeyData:         csr.privatKey,
+	}
+
+	k := newKubeconfig(file)
+	k.AuthInfos[fmt.Sprintf("%s@%s", username, k.getClusterName())] = &a
+
+	c := api.Context{
+		Cluster:  k.getClusterName(),
+		AuthInfo: fmt.Sprintf("%s@%s", username, k.getClusterName()),
+	}
+	k.Contexts[fmt.Sprintf("%s@%s", username, k.getClusterName())] = &c
+
+	err = clientcmd.WriteToFile(k.Config, file)
+	if err != nil {
+		panic(err)
+	}
 }
