@@ -26,11 +26,12 @@ type GitHubTagResponse struct {
 	Url string `json:"url"` //  "url": "https://api.github.com/repos/schreibe72/kc/git/refs/tags/v0.2.0",
 }
 
-var versionExp = regexp.MustCompile(`^refs/tags/v[0-9]+.[0-9]+(.[0-9]+)?$`)
+var versionTagExp = regexp.MustCompile(`^refs/tags/v[0-9]+.[0-9]+(.[0-9]+)?$`)
+var versionExp = regexp.MustCompile(`^v[0-9]+.[0-9]+(.[0-9]+)?$`)
 var versionNumExp = regexp.MustCompile(`[0-9]+`)
 
 func VersionFromString(str string) versiont {
-	if !versionExp.MatchString(str) {
+	if !(versionTagExp.MatchString(str) || versionExp.MatchString(str)) {
 		return versiont{}
 	}
 
@@ -159,9 +160,9 @@ func getAvailableVersions(owner, repo string) ([]versiont, error) {
 func parseVersions(tags []GitHubTagResponse) []versiont {
 	versions := make([]versiont, len(tags))
 	for i, tag := range tags {
-		if versionExp.MatchString(tag.Ref) {
-			log.Println("Found version", tag.Ref)
+		if versionTagExp.MatchString(tag.Ref) {
 			versions[i] = VersionFromString(tag.Ref)
+			log.Println("Found version", versions[i])
 		}
 	}
 	return versions
