@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"slices"
 
 	"github.com/manifoldco/promptui"
 	"k8s.io/client-go/tools/clientcmd"
@@ -27,6 +28,7 @@ func (k *kubeconfig) chooseContext(label string) string {
 	for n := range k.Contexts {
 		list = append(list, n)
 	}
+	slices.Sort(list)
 	prompt := promptui.Select{
 		Label: label,
 		Items: list,
