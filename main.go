@@ -139,7 +139,7 @@ func mergeContext(file, addFile string) {
 		panic(err)
 	}
 
-	a := newKubeconfig(addFile)
+        a := newKubeconfig(addFile)
 	for key, c := range a.Clusters {
 		k.Clusters[key] = c
 	}
@@ -169,7 +169,7 @@ func main() {
 	flag.BoolVar(&dryupd, "U", false, "Dry-run update kc")
 	flag.BoolVar(&delete, "d", false, "Choose context to delete")
 	flag.BoolVar(&addUser, "au", false, "Add a user context")
-	flag.StringVar(&addFile, "a", "", "Merge this file into kubeconfig")
+	flag.StringVar(&addFile, "a", "", "Merge this file into kubeconfig. Use - to read from stdin")
 	flag.Parse()
 
 	switch {

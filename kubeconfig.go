@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"slices"
+        "io"
+        "os"
 
 	"github.com/manifoldco/promptui"
 	"k8s.io/client-go/tools/clientcmd"
@@ -14,6 +16,10 @@ type kubeconfig struct {
 }
 
 func newKubeconfig(file string) *kubeconfig {
+        if file == "-" {
+                return newKubeconfigFromStdin()
+        }
+
 	kubeConfig, err := clientcmd.LoadFromFile(file)
 	if err != nil {
 		panic(err)
@@ -21,6 +27,21 @@ func newKubeconfig(file string) *kubeconfig {
 	var k kubeconfig
 	k.Config = *kubeConfig
 	return &k
+}
+
+func newKubeconfigFromStdin() *kubeconfig {
+        stdin, err := io.ReadAll(os.Stdin)
+        if err != nil {
+                panic(err)
+        }
+        
+        kubeConfig, err2 := clientcmd.Load(stdin)
+        if err2 != nil {
+                panic(err2)
+        }
+        var k kubeconfig
+        k.Config = *kubeConfig
+        return &k
 }
 
 func (k *kubeconfig) chooseContext(label string) string {
